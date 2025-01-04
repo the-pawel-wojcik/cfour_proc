@@ -3,7 +3,7 @@
 import argparse
 import json
 import sys
-from processors.irrep_no_to_name import get_irrep_no_to_name
+from cfour_proc.irrep_no_to_name import get_irrep_no_to_name
 
 
 # Only terms in the root with amplitude larger than this values will get

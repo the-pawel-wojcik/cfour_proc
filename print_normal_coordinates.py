@@ -5,6 +5,36 @@ import json
 import sys
 from geometry import get_all_geometries, distance_AU_to_A, trim_non_atoms
 
+GROUP_ORDER = {
+    'c2v': {
+        'A1': 0,
+        'A2': 1,
+        'B1': 2,
+        'B2': 3,
+    },
+    'c2h': {
+        'Ag': 0,
+        'Au': 1,
+        'Bg': 2,
+        'Bu': 3,
+    },
+    'd2': {
+        'A': 0,
+        'B1': 1,
+        'B2': 2,
+        'B3': 3,
+    },
+    'd2h': {
+        'Ag': 0,
+        'Au': 1,
+        'B1g': 2,
+        'B1u': 3,
+        'B2g': 4,
+        'B2u': 5,
+        'B3g': 6,
+        'B3u': 7,
+    },
+}
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -66,7 +96,7 @@ def collect_point_group(cfour) -> str:
     return point_group
 
 
-def collect_normal_coordinates(cfour):
+def collect_normal_coordinates(cfour) -> list:
     """
     Extracts normal coordinates.
 
@@ -118,11 +148,16 @@ def xsim_input_normal_coordinates(normal_coordinates):
 
 
 def sort_Mulliken(point_group, mode):
-    if point_group.lower() == "d2h":
-        return (mode['symmetry'], -mode['frequency, cm-1'])
-        # return mode['symmetry']
+    if point_group.lower() not in GROUP_ORDER:
+        print(
+            f"Warning: The point group {point_group} does not have Mulliken"
+            " support yet.",
+            file=sys.stderr
+        )
+        return -mode['frequency, cm-1']
 
-    return 0
+    irrep_to_order = GROUP_ORDER[point_group.lower()]
+    return (irrep_to_order[mode['symmetry']], -mode['frequency, cm-1'])
 
 
 def verbose_print(args, point_group: str, normal_coordinates) -> None:

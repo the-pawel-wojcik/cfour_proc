@@ -20,7 +20,8 @@ log(f"""Optimized geometry file comes from:
 
 
 shutil.copy2(src=args.ZMATnew, dst='.')
-os.rename('ZMATnew', 'ZMAT.tmp')
+cwd = Path('.')
+(cwd / 'ZMATnew').rename(target=(cwd / 'ZMAT.tmp'))
 log("ZMATnew renamed to ZMAT.tmp")
 
 
@@ -37,7 +38,7 @@ with open('ZMAT.tmp', 'r', encoding='utf-8') as zmattmp:
     for line in zmattmp:
         old_zmat['reminder'].append(line)
 
-log('Removed "*" symbols from the geometry specification (Z-matrix).')
+log('Removed `*` symbols from the geometry specification (Z-matrix).')
 
 # TODO: parse the CFOUR*() section
 # TODO: remove the optimization keywords: geo_conv, lineq_conv
@@ -56,12 +57,11 @@ with open('ZMAT', 'w', encoding='utf-8') as zmat_file:
         zmat_file.write(line)
 log('Edited file saved to ZMAT.')
 
-cwd = Path('.')
 (cwd / 'ZMAT.tmp').unlink()
-log('Removed ZMAT.tmp.')
+log('Removed the "ZMAT.tmp" file.')
 
 (cwd / 'findiff').mkdir()
-log('Created "findiff" directory.')
+log('Created a "findiff" directory.')
 
 (cwd / 'ZMAT').rename(target=(cwd / 'findiff' / 'ZMAT'))
-log('Moved "ZMAT" file to the "findiff" directory.')
+log('Moved the "ZMAT" file to the "findiff" directory.')

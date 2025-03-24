@@ -5,6 +5,7 @@ import json
 import sys
 from irrep_no_to_name import get_irrep_no_to_name
 
+au2eV = 27.211386245988
 
 # Only terms in the root with amplitude larger than this values will get
 # printed. If the threshold is set too small, then amplitudes with large MO #
@@ -58,14 +59,7 @@ def get_basis(cfour):
     return basis
 
 
-def add_irrep_energy_no_and_name(roots: list, cfour):
-    """
-    Using the SCF listing add translation from the irrep number that CFOUR uses
-    to the irrep name (e.g. Ag, or B3u).
-
-    Additionally add the `energy #` keyword to each irrep. This number orders
-    the states by their energy, but there is a separate counter for each irrep.
-    """
+def add_irrep_energy_no_and_name(roots, cfour):
     irrep_no_to_name = get_irrep_no_to_name(cfour)
 
     roots.sort(key=lambda x: x['energy']['total']['au'])
@@ -80,6 +74,15 @@ def add_irrep_energy_no_and_name(roots: list, cfour):
         else:
             energy_irrep[number] = 1
         irrep['energy #'] = energy_irrep[number]
+
+
+def add_excitation_energy(roots, cc_energy_au: float):
+    for root in roots:
+        excitation_energy_au = root['energy']['total']['au'] - cc_energy_au
+        root['energy']['excitation'] = {
+            'au': excitation_energy_au,
+            'eV': excitation_energy_au * au2eV,
+        }
 
 
 def get_scf_energy(cfour):
@@ -116,7 +119,7 @@ def get_cc_data(cfour):
 
     if xncc['name'] != 'xncc':
         print("Error! xncc section was not found!", file=sys.stderr)
-        return {}
+        return
 
     for cc in xncc['sections']:
         if cc['name'] == 'cc':
@@ -134,47 +137,51 @@ def get_cc_data(cfour):
     return data
 
 
-def collect_eom_roots_xncc(cfour):
+def collect_eom_roots_xvee(cfour):
     """ Extracts EOM roots data from parsed CFOUR's output.
     returns:
         roots: list()
     """
     roots = []
 
-    for xncc in cfour:
-        if xncc['name'] != 'xncc':
+    for xvee in cfour:
+        if xvee['name'] != 'xvee':
             continue
-        for eom in xncc['sections']:
-            if eom['name'] != 'eom':
+        for solution in xvee['sections']:
+            if solution['name'] != 'eom solution':
                 continue
-            for eom_irrep in eom['sections']:
-                if eom_irrep['name'] != 'irrep':
-                    continue
-                irrep_data = eom_irrep['data']
-                for eom_root in eom_irrep['sections']:
-                    if eom_root['name'] != 'eom root':
-                        continue
-                    eom_model = eom_root['data']['model']
-                    for eom_root_subsec in eom_root['sections']:
-                        if eom_root_subsec['name'] == 'converged root':
-                            converged_root = eom_root_subsec['data']
-                            continue
 
-                        if eom_root_subsec['name'] == 'EOM energy':
-                            root_energy = eom_root_subsec['data']
-                            continue
+            # TODO: move the metadata test to a separate module
+            if solution['metadata']['ok'] is False:
+                if 'start' in solution:
+                    start = solution['start']
+                else:
+                    start = 0
 
-                    roots += [{
-                        'model': eom_model,
-                        'irrep': dict(irrep_data),
-                        'converged root': converged_root,
-                        'energy': root_energy,
-                    }]
+                if 'end' in solution:
+                    end = solution['end']
+                else:
+                    end = -1
+
+                print("Warning: Cannot read from an ivalid section "
+                      f"{solution['name']} (lines {start}-{end}).",
+                      file=sys.stderr)
+                continue
+
+            eom_model = solution['data']['model']
+            root_energy = solution['data']['energy']
+            irrep = solution['data']['irrep']
+
+            roots += [{
+                'model': eom_model,
+                'irrep': irrep,
+                'energy': root_energy,
+            }]
+
         break
 
     if len(roots) == 0:
-        print("Info: No xncc EOM roots found.",
-              file=sys.stderr)
+        print("Info: No xvee EOM roots found.", file=sys.stderr)
 
     return roots
 
@@ -214,11 +221,16 @@ def print_eom_roots_summary(roots, print_lvl):
         energy_id = root['ids']['energy #']
         print(f"{id:2}: Root {energy_id+1:2d}/{n_roots}: "
               f"{irrep_energy_no} {irrep_name:3} (irrep #{irrep_no}): "
-              f"{root['energy']['excitation']['eV']:6.3f} eV")
+              f"{root['energy']['excitation']['eV']:6.3f} eV"
+              f" ({root['energy']['total']['au']:6.3f} Ha).")
 
         # Print singles only with double flag
         if print_lvl < 2:
             continue
+
+        # TODO: not available for xvee
+        print("TODO: only basic printout is available so far for xvee.")
+        continue
 
         print("Singles:")
         singles = [single for single in root['converged root']['singles'] if
@@ -256,6 +268,7 @@ def print_eom_roots_for_CBS_fitting(roots, cfour):
         'basis': basis,
         'scf': scf,
     }
+    # TODO: get_cc_data works only with xncc
     cc = get_cc_data(cfour)
     cbs_input.update(cc)
     cbs_input['EOM'] = list()
@@ -274,15 +287,19 @@ def print_eom_roots_for_CBS_fitting(roots, cfour):
     return cbs_input
 
 
-def add_root_ids(roots: list) -> None:
+# TODO: this function is shared with print_roots for xncc make is a library.
+def add_root_ids(roots):
     """
     For each root in the list add an ordering number '#' that does not
-    correspond to anything but it a unique number assigend to each root.
+    correspond to anything but it a unique number assigned to each root.
 
-    For each root assign also the 'energy #', which tells the state number
-    when states are sorted in by their total energy.
+    For each root assigned also the 'energy #', which tells which orders the
+    states by their energy.
 
     The ids are saved as a dictionary under the key 'ids' of the root.
+
+    Input:
+        roots: list()
     """
     for counter, root in enumerate(roots):
         root['ids'] = {'#': counter}
@@ -292,20 +309,68 @@ def add_root_ids(roots: list) -> None:
         root['ids']['energy #'] = counter
 
 
+def collect_ccsd(cfour) -> list[float]:
+    """ Extract total CC energy from every xvcc program run.
+    returns:
+        roots: list[float]
+    """
+    cc_total_energies_au = []
+
+    for xvcc in cfour:
+        if xvcc['name'] != 'xvcc':
+            continue
+        for miracle in xvcc['sections']:
+            if miracle['name'] != 'A miracle':
+                continue
+
+            # TODO: move the metadata test to a separate module
+            if miracle['metadata']['ok'] is False:
+                if 'start' in miracle:
+                    start = miracle['start']
+                else:
+                    start = 0
+
+                if 'end' in miracle:
+                    end = miracle['end']
+                else:
+                    end = -1
+
+                print("Warning: Cannot read from an ivalid section "
+                      f"{miracle['name']} (lines {start}-{end}).",
+                      file=sys.stderr)
+                continue
+
+            cc_total_energy_au = miracle['data']['energy']['total']['au']
+            cc_total_energies_au += [cc_total_energy_au]
+
+    if len(cc_total_energies_au) == 0:
+        print("Info: No CC total energies found in xvcc.", file=sys.stderr)
+
+    return cc_total_energies_au
+
+
 def main():
     args = get_args()
     with open(args.cfour_file, 'r') as cfour_file_input:
         cfour = json.load(cfour_file_input)
 
-    roots = collect_eom_roots_xncc(cfour)
+    cc_energies = collect_ccsd(cfour)
+    roots = collect_eom_roots_xvee(cfour)
     add_root_ids(roots)
     add_irrep_energy_no_and_name(roots, cfour)
+    add_excitation_energy(roots, cc_energies[0])
 
+    # TODO: implement xvcc parsing from xvcc
+    # TODO: xvcc is ready!
     if args.cbs is True:
-        print_eom_roots_for_CBS_fitting(roots, cfour)
+        print("TODO: implement cc parsing for xvcc", file=sys.stderr)
+        # print_eom_roots_for_CBS_fitting(roots, cfour)
 
+    # TODO: implement parsing of converged root section of xvee
     if args.excite is True:
-        print_cfour_excite_section(roots)
+        print("TODO: implement parsing of converged root section of xvee",
+              file=sys.stderr)
+        # print_cfour_excite_section(roots)
 
     if args.json is True:
         print(json.dumps(roots))
